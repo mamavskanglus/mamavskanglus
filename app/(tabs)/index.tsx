@@ -1,4 +1,4 @@
-// app/index.tsx - COMPLETE REWRITE FOR CONSISTENT EXPERIENCE
+// app/index.tsx - DEPLOYMENT FIXES
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
 
@@ -7,18 +7,20 @@ const { width, height } = Dimensions.get('window');
 // CONSTANTS - MATCHING MOBILE EXPERIENCE
 const BIRD_SIZE = 60;
 const PIPE_WIDTH = 60;
-const INITIAL_PIPE_GAP = 200; // Reduced gap for more challenge (was 300)
-const INITIAL_GRAVITY = 0.5; // Increased for faster gameplay (was 0.35)
-const INITIAL_FLAP_STRENGTH = -8; // Stronger flap (was -6)
-const INITIAL_PIPE_SPEED = 3.5; // Much faster pipes (was 1.2)
+const INITIAL_PIPE_GAP = 200;
+const INITIAL_GRAVITY = 0.5;
+const INITIAL_FLAP_STRENGTH = -8;
+const INITIAL_PIPE_SPEED = 3.5;
 const MAX_LIVES = 3;
 const CLOUD_WIDTH = 100;
 const CLOUD_HEIGHT = 60;
 const GRASS_HEIGHT = 30;
-const BULLET_SPEED = 12; // Faster bullets (was 10)
+const BULLET_SPEED = 12;
 const BULLET_SIZE = 15;
 const VILLAIN_SIZE = 120;
-const VILLAIN_SPEED = 3.5; // Faster villains (was 2.2)
+const VILLAIN_SPEED = 3.5;
+const PLAYABLE_TOP = 100;
+const PLAYABLE_BOTTOM = height - 130; // Account for grass + ground
 
 interface Pipe { id: number; x: number; topHeight: number; scored: boolean; }
 interface Cloud { id: number; x: number; y: number; speed: number; size: number; }
@@ -50,7 +52,6 @@ export default function GameScreen() {
   const [invincible, setInvincible] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
-  // Physics that match mobile exactly
   const [currentGravity, setCurrentGravity] = useState(INITIAL_GRAVITY);
   const [currentFlapStrength, setCurrentFlapStrength] = useState(INITIAL_FLAP_STRENGTH);
 
@@ -64,76 +65,116 @@ export default function GameScreen() {
   const lastBulletSpawn = useRef(0);
   const lastPipeSpawn = useRef(0);
 
-  // FIXED: Better frame rate control
   const lastFrameTime = useRef(0);
   const targetFPS = 60;
   const frameInterval = 1000 / targetFPS;
 
-  // FIXED: Web Audio that actually works
+  // FIXED: Better audio handling with proper cleanup
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
-  const [backgroundMusic, setBackgroundMusic] = useState<AudioBufferSourceNode | null>(null);
+  const backgroundMusicRef = useRef<AudioBufferSourceNode | null>(null);
+  const cachedAudioBufferRef = useRef<AudioBuffer | null>(null);
 
   // Initialize Audio
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      // Web Audio API setup
-      const initAudio = async () => {
-        try {
-          const context = new (window.AudioContext || (window as any).webkitAudioContext)();
-          setAudioContext(context);
-          
-          // Load background music
-          const response = await fetch('/assets/sounds/background-music.mp3');
-          const arrayBuffer = await response.arrayBuffer();
-          const audioBuffer = await context.decodeAudioData(arrayBuffer);
-          
-          const source = context.createBufferSource();
-          source.buffer = audioBuffer;
-          source.loop = true;
-          source.connect(context.destination);
-          setBackgroundMusic(source);
-        } catch (error) {
-          console.log('Web audio initialization failed:', error);
+    const initAudio = async () => {
+      try {
+        const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+        setAudioContext(context);
+        
+        if (context.state === 'suspended') {
+          context.resume();
         }
-      };
-      
+      } catch (error) {
+        console.log('Audio context creation failed:', error);
+      }
+    };
+    
+    if (Platform.OS === 'web') {
       initAudio();
     }
   }, []);
 
-  // Audio control
+  // FIXED: Load background music once and cache it
   useEffect(() => {
-    if (Platform.OS === 'web' && audioContext && backgroundMusic) {
-      if ((gameState === 'playing' || gameState === 'countdown') && !isMuted) {
+    if (!audioContext) return;
+
+    const loadBackgroundMusic = async () => {
+      try {
+        const response = await fetch('/assets/sounds/background-music.mp3');
+        if (!response.ok) {
+          console.warn('Audio file not found, continuing without music');
+          return;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        cachedAudioBufferRef.current = audioBuffer;
+      } catch (error) {
+        console.log('Background music loading failed:', error);
+      }
+    };
+
+    loadBackgroundMusic();
+  }, [audioContext]);
+
+  // FIXED: Better audio playback control
+  useEffect(() => {
+    if (!audioContext || !cachedAudioBufferRef.current) return;
+
+    const shouldPlay = (gameState === 'playing' || gameState === 'countdown') && !isMuted;
+
+    if (shouldPlay) {
+      try {
         if (audioContext.state === 'suspended') {
           audioContext.resume();
         }
-        backgroundMusic.start(0);
-      } else {
-        if (backgroundMusic) {
-          backgroundMusic.stop();
-          // Create new source for next play
-          if (audioContext && backgroundMusic.buffer) {
-            const newSource = audioContext.createBufferSource();
-            newSource.buffer = backgroundMusic.buffer;
-            newSource.loop = true;
-            newSource.connect(audioContext.destination);
-            setBackgroundMusic(newSource);
-          }
+
+        // Stop existing source
+        if (backgroundMusicRef.current) {
+          try {
+            backgroundMusicRef.current.stop();
+          } catch (e) {}
         }
+
+        // Create and play new source
+        const source = audioContext.createBufferSource();
+        source.buffer = cachedAudioBufferRef.current;
+        source.loop = true;
+        source.connect(audioContext.destination);
+        source.start(0);
+        backgroundMusicRef.current = source;
+      } catch (error) {
+        console.log('Audio playback error:', error);
+      }
+    } else {
+      if (backgroundMusicRef.current) {
+        try {
+          backgroundMusicRef.current.stop();
+          backgroundMusicRef.current = null;
+        } catch (e) {}
       }
     }
-  }, [gameState, isMuted, audioContext, backgroundMusic]);
+
+    return () => {
+      if (backgroundMusicRef.current) {
+        try {
+          backgroundMusicRef.current.stop();
+          backgroundMusicRef.current = null;
+        } catch (e) {}
+      }
+    };
+  }, [gameState, isMuted, audioContext]);
 
   const toggleMute = () => {
     setIsMuted(prev => !prev);
   };
 
   const playDeathSound = async () => {
-    if (isMuted || Platform.OS !== 'web' || !audioContext) return;
+    if (isMuted || !audioContext) return;
     
     try {
       const response = await fetch('/assets/sounds/death-sound.mp3');
+      if (!response.ok) return;
+      
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       
@@ -146,7 +187,6 @@ export default function GameScreen() {
     }
   };
 
-  // Add death effect animation
   const addDeathEffect = (x: number, y: number) => {
     const progress = new Animated.Value(0);
     const effect: DeathEffect = { id: Date.now(), x, y, progress };
@@ -170,23 +210,21 @@ export default function GameScreen() {
         id: i,
         x: Math.random() * width,
         y: Math.random() * (height / 3) + 50,
-        speed: 0.8 + Math.random() * 1, // Faster clouds
+        speed: 0.8 + Math.random() * 1,
         size: 0.8 + Math.random() * 0.4
       });
     }
     setClouds(arr);
   }, []);
 
-  // Difficulty scaling - More aggressive to match mobile
+  // Difficulty scaling
   useEffect(() => {
     if (gameState === 'playing') {
-      const lvl = Math.floor(score / 5); // Level up every 5 points instead of 10
+      const lvl = Math.floor(score / 5);
       
-      // Much more aggressive difficulty increase
       setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.15);
-      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 3)); // Smaller gaps faster
+      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 3));
       
-      // Faster character progression
       const speedMultiplier = 1 + (lvl * 0.15);
       setCurrentGravity(INITIAL_GRAVITY * speedMultiplier);
       setCurrentFlapStrength(INITIAL_FLAP_STRENGTH * speedMultiplier);
@@ -205,7 +243,6 @@ export default function GameScreen() {
     frameCount.current = 0;
     passedPipes.current = new Set();
     
-    // Reset to faster initial values
     setPipeSpeed(INITIAL_PIPE_SPEED);
     setPipeGap(INITIAL_PIPE_GAP);
     setCurrentGravity(INITIAL_GRAVITY);
@@ -243,7 +280,6 @@ export default function GameScreen() {
     }
   };
 
-  // AUTO-SHOOT: Faster shooting
   const autoShoot = () => {
     if (gameState === 'playing') {
       const newBullet: Bullet = {
@@ -268,10 +304,15 @@ export default function GameScreen() {
     return { id: Date.now(), x: width, topHeight, scored: false };
   };
 
-  // FIXED: Villain spawn - Only from right, never inside pipes
+  // FIXED: Villain spawn - Keep within playable area
   const generateVillain = (): Villain | null => {
-    // Only spawn from right to avoid pipe collisions
-    const y = Math.random() * (height - 250) + 100; // Keep away from top/bottom
+    // Spawn only in playable area (not in grass/ground)
+    const minY = PLAYABLE_TOP + 20;
+    const maxY = PLAYABLE_BOTTOM - VILLAIN_SIZE - 20;
+    
+    if (maxY <= minY) return null;
+    
+    const y = Math.random() * (maxY - minY) + minY;
     
     // Check if this Y position is clear of pipes
     let isClear = true;
@@ -280,11 +321,13 @@ export default function GameScreen() {
       const pipeGapTop = pipe.topHeight;
       const pipeGapBottom = pipe.topHeight + pipeGap;
       
-      // If villain would spawn near a pipe, skip
-      if (pipeRight > width - 200 && 
-          (y < pipeGapTop - 80 || y + VILLAIN_SIZE > pipeGapBottom + 80)) {
-        isClear = false;
-        break;
+      if (pipeRight > width - 200) {
+        const villainBottom = y + VILLAIN_SIZE;
+        // Check if villain would collide with pipes
+        if ((y < pipeGapTop - 100 || villainBottom > pipeGapBottom + 100)) {
+          isClear = false;
+          break;
+        }
       }
     }
     
@@ -344,7 +387,7 @@ export default function GameScreen() {
             useNativeDriver: true 
           }),
         ]),
-        { iterations: 6 } // More blinking
+        { iterations: 6 }
       ).start(() => {
         invincibleAnim.setValue(1);
         setInvincible(false);
@@ -359,13 +402,12 @@ export default function GameScreen() {
     if (score > highScore) setHighScore(score);
   };
 
-  // FIXED: Optimized game loop with consistent physics
+  // FIXED: Optimized game loop with consistent physics and villain spawn fix
   useEffect(() => {
     if (gameState !== 'playing') return;
     let rafId = 0;
 
     const loop = (timestamp: number) => {
-      // Proper frame rate limiting
       if (!lastFrameTime.current) lastFrameTime.current = timestamp;
       const deltaTime = timestamp - lastFrameTime.current;
       
@@ -377,41 +419,40 @@ export default function GameScreen() {
       lastFrameTime.current = timestamp;
       frameCount.current++;
 
-      // Clouds - optimized
+      // Clouds
       if (frameCount.current % 2 === 0) {
         setClouds(prev => prev.map(c => ({ ...c, x: c.x - c.speed })).filter(c => c.x > -CLOUD_WIDTH));
       }
 
-      // Bird physics - matches mobile exactly
+      // Bird physics
       birdVelocity.current += currentGravity;
       setBirdY(prev => {
         const newY = prev + birdVelocity.current;
-        if (newY < 0 || newY > height - BIRD_SIZE - 100) {
+        if (newY < PLAYABLE_TOP || newY > PLAYABLE_BOTTOM - BIRD_SIZE) {
           loseLife();
-          return Math.max(0, Math.min(newY, height - BIRD_SIZE - 100));
+          return Math.max(PLAYABLE_TOP, Math.min(newY, PLAYABLE_BOTTOM - BIRD_SIZE));
         }
         return newY;
       });
 
-      // Faster pipe spawning
       const now = Date.now();
-      if (now - lastPipeSpawn.current > 1800) { // More frequent pipes
+      
+      // Pipe spawning
+      if (now - lastPipeSpawn.current > 1800) {
         setPipes(prev => [...prev, generatePipe()]);
         lastPipeSpawn.current = now;
       }
 
       // Faster shooting
-      if (now - lastBulletSpawn.current > 400) { // More frequent shooting
+      if (now - lastBulletSpawn.current > 400) {
         autoShoot();
         lastBulletSpawn.current = now;
       }
 
-      // More frequent villains
-      const villainSpawnRate = Math.max(3000, 4000 - score * 100);
+      // FIXED: More aggressive villain spawning - every 2-3 seconds
+      const villainSpawnRate = 2500; // Fixed 2.5 seconds spawn rate
       if (now - lastVillainSpawn.current > villainSpawnRate) {
-        if (Math.random() < 0.5) { // Higher spawn chance
-          spawnVillainGroup();
-        }
+        spawnVillainGroup();
         lastVillainSpawn.current = now;
       }
 
@@ -421,15 +462,21 @@ export default function GameScreen() {
         return moved.filter(b => b.x < width + 50);
       });
 
-      // Move villains
+      // Move villains - constrain to playable area
       setVillains(prev => 
-        prev.map(v => ({ 
-          ...v, 
-          x: v.x + v.speedX
-        })).filter(v => v.x > -VILLAIN_SIZE * 2)
+        prev.map(v => {
+          let newY = v.y + v.speedY;
+          // Keep villains in playable area
+          newY = Math.max(PLAYABLE_TOP, Math.min(newY, PLAYABLE_BOTTOM - VILLAIN_SIZE));
+          return { 
+            ...v,
+            x: v.x + v.speedX,
+            y: newY
+          };
+        }).filter(v => v.x > -VILLAIN_SIZE * 2)
       );
 
-      // Move pipes and handle collisions - FASTER
+      // Move pipes and handle collisions
       setPipes(prev => {
         const newPipes = prev.map(p => ({ ...p, x: p.x - pipeSpeed }));
         newPipes.forEach(pipe => {
@@ -538,12 +585,12 @@ export default function GameScreen() {
 
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
-  }, [gameState, birdY, score, pipeSpeed, invincible, pipeGap, lives, currentGravity, pipes]);
+  }, [gameState, birdY, score, pipeSpeed, invincible, pipeGap, lives, currentGravity, pipes, currentFlapStrength]);
 
   const getRotationDeg = () => {
     const v = birdVelocity.current;
-    if (v < 0) return -20; // More rotation
-    return Math.min(25, v * 2); // More responsive rotation
+    if (v < 0) return -20;
+    return Math.min(25, v * 2);
   };
 
   const renderHearts = () => (
@@ -570,7 +617,6 @@ export default function GameScreen() {
     </TouchableOpacity>
   );
 
-  // Menu Screen
   if (gameState === 'menu') {
     return (
       <View style={styles.container}>
@@ -597,7 +643,6 @@ export default function GameScreen() {
     );
   }
 
-  // Game Screen
   return (
     <TouchableOpacity 
       style={styles.gameContainer} 
@@ -620,7 +665,6 @@ export default function GameScreen() {
 
       <MuteButton />
 
-      {/* Hero character */}
       <Animated.Image
         source={require('../../assets/images/head.png')}
         style={[
@@ -637,7 +681,6 @@ export default function GameScreen() {
         resizeMode="contain"
       />
 
-      {/* Auto-shooting bullets */}
       {bullets.map(b => (
         <View
           key={b.id}
@@ -648,7 +691,6 @@ export default function GameScreen() {
         />
       ))}
 
-      {/* Villains - Only from right */}
       {villains.map(v => (
         <Animated.Image 
           key={v.id} 
@@ -665,7 +707,6 @@ export default function GameScreen() {
         />
       ))}
 
-      {/* Death effects */}
       {deathEffects.map(effect => (
         <Animated.View
           key={effect.id}
@@ -691,7 +732,6 @@ export default function GameScreen() {
         />
       ))}
 
-      {/* Pipes - More challenging */}
       {pipes.map(p => (
         <View key={p.id}>
           <View style={[styles.pipe, { left: p.x, height: p.topHeight, top: 0 }]}>
@@ -713,7 +753,6 @@ export default function GameScreen() {
       <View style={styles.grass} />
       <View style={styles.ground} />
 
-      {/* Countdown overlay */}
       {gameState === 'countdown' && (
         <Animated.View pointerEvents="none" style={[styles.countdownOverlay, { opacity: overlayAnim }]}>
           <Text style={styles.countdownText}>{countdown}</Text>
@@ -721,7 +760,6 @@ export default function GameScreen() {
         </Animated.View>
       )}
 
-      {/* Game over overlay */}
       {gameState === 'gameover' && (
         <View style={styles.gameOverOverlay}>
           <Text style={styles.gameOverText}>GAME OVER</Text>
@@ -755,7 +793,6 @@ export default function GameScreen() {
   );
 }
 
-// Styles remain the same as previous version...
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
