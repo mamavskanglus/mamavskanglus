@@ -1,26 +1,30 @@
-// DEPLOYMENT READY VERSION - Fixed image paths
+// FINAL PRODUCT VERSION - Balanced for all devices
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform, Alert, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
-// CONSTANTS
+// CONSTANTS - BALANCED FOR ALL DEVICES
 const BIRD_SIZE = 60;
 const PIPE_WIDTH = 60;
 const INITIAL_PIPE_GAP = 200;
-const INITIAL_GRAVITY = 0.5;
-const INITIAL_FLAP_STRENGTH = -8;
-const INITIAL_PIPE_SPEED = 3.5;
+const INITIAL_GRAVITY = Platform.OS === 'web' ? 0.5 : 0.4; // Slightly less gravity for mobile
+const INITIAL_FLAP_STRENGTH = Platform.OS === 'web' ? -8 : -9; // Stronger flap for mobile
+const INITIAL_PIPE_SPEED = 3.0; // Reduced from 3.5
 const MAX_LIVES = 3;
 const CLOUD_WIDTH = 100;
 const CLOUD_HEIGHT = 60;
 const GRASS_HEIGHT = 30;
-const BULLET_SPEED = 12;
+const BULLET_SPEED = 10; // Reduced from 12
 const BULLET_SIZE = 15;
 const VILLAIN_SIZE = 120;
-const VILLAIN_SPEED = 3.5;
+const VILLAIN_SPEED = 3.0; // Reduced from 3.5
 const PLAYABLE_TOP = 100;
 const PLAYABLE_BOTTOM = height - 130;
+
+// TOUCH OPTIMIZATION
+const TAP_DEBOUNCE = 100; // Prevent rapid taps
+const FLAP_COOLDOWN = 50; // Minimum time between flaps
 
 interface Pipe { id: number; x: number; topHeight: number; scored: boolean; }
 interface Cloud { id: number; x: number; y: number; speed: number; size: number; }
@@ -51,8 +55,6 @@ export default function GameScreen() {
   const [lives, setLives] = useState(MAX_LIVES);
   const [invincible, setInvincible] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [audioStatus, setAudioStatus] = useState('Initializing...');
-  const [showDebug, setShowDebug] = useState(false);
 
   const [currentGravity, setCurrentGravity] = useState(INITIAL_GRAVITY);
   const [currentFlapStrength, setCurrentFlapStrength] = useState(INITIAL_FLAP_STRENGTH);
@@ -66,6 +68,7 @@ export default function GameScreen() {
   const lastVillainSpawn = useRef(0);
   const lastBulletSpawn = useRef(0);
   const lastPipeSpawn = useRef(0);
+  const lastFlapTime = useRef(0); // For flap cooldown
 
   const lastFrameTime = useRef(0);
   const targetFPS = 60;
@@ -79,16 +82,9 @@ export default function GameScreen() {
   useEffect(() => {
     const initAudio = async () => {
       try {
-        setAudioStatus('Creating audio context...');
         const context = new (window.AudioContext || (window as any).webkitAudioContext)();
         setAudioContext(context);
-        setAudioStatus(`Audio context created: ${context.state}`);
-        
-        if (context.state === 'suspended') {
-          setAudioStatus('Audio suspended, will resume on user interaction');
-        }
       } catch (error) {
-        setAudioStatus(`❌ Audio context error: ${error}`);
         console.error('Audio context creation failed:', error);
       }
     };
@@ -98,49 +94,36 @@ export default function GameScreen() {
     }
   }, []);
 
-  // Load Audio Files - USING PUBLIC FOLDER PATHS
+  // Load Audio Files
   useEffect(() => {
     if (!audioContext) return;
 
     const loadAudio = async () => {
       try {
-        // Paths relative to public folder
         const pathsToTry = [
           '/sounds/background-music.mp3',
           './sounds/background-music.mp3',
           'sounds/background-music.mp3',
-          `${window.location.origin}/sounds/background-music.mp3`,
         ];
 
         let response = null;
-        let successPath = null;
 
         for (const path of pathsToTry) {
           try {
-            setAudioStatus(`Trying: ${path}`);
             response = await fetch(path);
-            if (response.ok) {
-              successPath = path;
-              setAudioStatus(`✅ Audio loaded from: ${path}`);
-              break;
-            }
+            if (response.ok) break;
           } catch (e) {
-            console.log(`Failed: ${path}`);
+            // Continue to next path
           }
         }
 
-        if (!response || !response.ok) {
-          setAudioStatus('❌ Audio file not found. Please check public/sounds/ folder.');
-          return;
-        }
+        if (!response || !response.ok) return;
 
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         cachedAudioBufferRef.current = audioBuffer;
-        setAudioStatus('🎵 Audio ready!');
 
       } catch (error) {
-        setAudioStatus(`❌ Audio error: ${error}`);
         console.error('Audio loading failed:', error);
       }
     };
@@ -157,9 +140,7 @@ export default function GameScreen() {
     if (shouldPlay) {
       try {
         if (audioContext.state === 'suspended') {
-          audioContext.resume().then(() => {
-            console.log('Audio resumed');
-          });
+          audioContext.resume();
         }
 
         if (backgroundMusicRef.current) {
@@ -174,7 +155,6 @@ export default function GameScreen() {
         source.connect(audioContext.destination);
         source.start(0);
         backgroundMusicRef.current = source;
-        console.log('Background music playing');
       } catch (error) {
         console.error('Audio playback error:', error);
       }
@@ -199,35 +179,6 @@ export default function GameScreen() {
 
   const toggleMute = () => {
     setIsMuted(prev => !prev);
-  };
-
-  const testAudioFile = async () => {
-    try {
-      setAudioStatus('Testing audio file access...');
-      
-      const testPaths = [
-        '/sounds/background-music.mp3',
-        './sounds/background-music.mp3',
-        'sounds/background-music.mp3',
-      ];
-
-      for (const path of testPaths) {
-        try {
-          const response = await fetch(path);
-          setAudioStatus(prev => prev + `\n${path}: ${response.status} ${response.statusText}`);
-          
-          if (response.ok) {
-            const content = await response.blob();
-            setAudioStatus(prev => prev + ` ✅ (${(content.size / 1024).toFixed(1)}KB)`);
-            break;
-          }
-        } catch (error) {
-          setAudioStatus(prev => prev + ` ❌`);
-        }
-      }
-    } catch (error) {
-      setAudioStatus(`Test failed: ${error}`);
-    }
   };
 
   const playDeathSound = async () => {
@@ -295,10 +246,12 @@ export default function GameScreen() {
     if (gameState === 'playing') {
       const lvl = Math.floor(score / 5);
       
-      setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.15);
-      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 3));
+      // Reduced speed progression
+      setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.1); // Reduced from 0.15
+      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 2)); // Reduced from 3
       
-      const speedMultiplier = 1 + (lvl * 0.15);
+      // Reduced speed multiplier
+      const speedMultiplier = 1 + (lvl * 0.1); // Reduced from 0.15
       setCurrentGravity(INITIAL_GRAVITY * speedMultiplier);
       setCurrentFlapStrength(INITIAL_FLAP_STRENGTH * speedMultiplier);
     }
@@ -328,6 +281,7 @@ export default function GameScreen() {
     lastVillainSpawn.current = Date.now();
     lastBulletSpawn.current = Date.now();
     lastPipeSpawn.current = Date.now();
+    lastFlapTime.current = 0;
 
     lastFrameTime.current = 0;
 
@@ -349,7 +303,13 @@ export default function GameScreen() {
 
   const flap = () => {
     if (gameState === 'playing') {
-      birdVelocity.current = currentFlapStrength;
+      const now = Date.now();
+      
+      // Prevent rapid tapping and allow smooth control
+      if (now - lastFlapTime.current > FLAP_COOLDOWN) {
+        birdVelocity.current = currentFlapStrength;
+        lastFlapTime.current = now;
+      }
     }
   };
 
@@ -508,12 +468,13 @@ export default function GameScreen() {
         lastPipeSpawn.current = now;
       }
 
-      if (now - lastBulletSpawn.current > 400) {
+      // Reduced firing rate from 400ms to 600ms
+      if (now - lastBulletSpawn.current > 600) {
         autoShoot();
         lastBulletSpawn.current = now;
       }
 
-      const villainSpawnRate = 2500;
+      const villainSpawnRate = 2800; // Increased from 2500
       if (now - lastVillainSpawn.current > villainSpawnRate) {
         spawnVillainGroup();
         lastVillainSpawn.current = now;
@@ -679,26 +640,6 @@ export default function GameScreen() {
       <View style={styles.container}>
         {renderClouds()}
         <Text style={styles.title}>MAMA vs BANGLADESHI MIYA</Text>
-        
-        {showDebug && (
-          <View style={styles.debugBox}>
-            <View style={styles.debugHeader}>
-              <Text style={styles.debugTitle}>🔧 AUDIO DEBUG</Text>
-              <TouchableOpacity onPress={() => setShowDebug(false)}>
-                <Text style={styles.debugClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.debugContent}>
-              <Text style={styles.debugText}>{audioStatus}</Text>
-            </ScrollView>
-            <TouchableOpacity style={styles.debugButton} onPress={testAudioFile}>
-              <Text style={styles.debugButtonText}>Test Audio File</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.debugButton} onPress={() => setShowDebug(false)}>
-              <Text style={styles.debugButtonText}>Hide Debug</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         <View style={styles.highScoreContainer}>
           <Text style={styles.highScoreLabel}>HIGH SCORE</Text>
@@ -711,13 +652,10 @@ export default function GameScreen() {
           <TouchableOpacity style={styles.quitButton} onPress={quitGame}>
             <Text style={styles.buttonText}>✕ QUIT</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.debugToggleButton} onPress={() => setShowDebug(!showDebug)}>
-            <Text style={styles.debugToggleButtonText}>{showDebug ? '🔧 HIDE DEBUG' : '🔧 SHOW DEBUG'}</Text>
-          </TouchableOpacity>
         </View>
         <Text style={styles.instructions}>
           Tap to flap • Auto-shooting enabled • Avoid pillars and villains!{'\n'}
-          FAST-PACED GAMEPLAY - Matching Mobile Experience!
+          Optimized for all devices - Smooth gameplay!
         </Text>
         <MuteButton />
       </View>
@@ -729,6 +667,7 @@ export default function GameScreen() {
       style={styles.gameContainer} 
       activeOpacity={1} 
       onPress={flap}
+      delayPressIn={0} // iOS touch optimization
     >
       <View style={styles.skyBackground} />
       {renderClouds()}
@@ -747,7 +686,7 @@ export default function GameScreen() {
       <MuteButton />
 
       <Animated.Image
-        source={require('../../assets/images/head.png')} // KEEP assets path for images
+        source={require('../../assets/images/head.png')}
         style={[
           styles.birdImage,
           { 
@@ -775,7 +714,7 @@ export default function GameScreen() {
       {villains.map(v => (
         <Animated.Image 
           key={v.id} 
-          source={require('../../assets/images/friends.png')} // KEEP assets path for images
+          source={require('../../assets/images/friends.png')}
           style={[
             styles.villain, 
             { 
@@ -902,65 +841,6 @@ const styles = StyleSheet.create({
     marginBottom: 20, 
     textAlign: 'center', 
     zIndex: 10 
-  },
-  debugBox: {
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 20,
-    width: '100%',
-    maxHeight: 200,
-    borderWidth: 2,
-    borderColor: '#FF6B6B'
-  },
-  debugHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10
-  },
-  debugTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#FFD700'
-  },
-  debugClose: {
-    fontSize: 18,
-    color: '#FF6B6B'
-  },
-  debugContent: {
-    maxHeight: 120,
-    marginBottom: 10
-  },
-  debugText: {
-    fontSize: 12,
-    color: '#00FF00',
-    fontFamily: 'monospace',
-    lineHeight: 18
-  },
-  debugButton: {
-    backgroundColor: '#FF6B6B',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 5
-  },
-  debugButtonText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: 'white'
-  },
-  debugToggleButton: {
-    backgroundColor: '#666',
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 10
-  },
-  debugToggleButtonText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: 'white'
   },
   highScoreContainer: { 
     backgroundColor: 'rgba(255,255,255,0.9)', 
