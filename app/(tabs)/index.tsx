@@ -1,6 +1,6 @@
-// app/index.tsx - FIXED VILLAIN SPAWNING
+// app/index.tsx - WITH FRAME RATE LIMITING FOR WEB
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
 import { Audio } from 'expo-av';
 
 const { width, height } = Dimensions.get('window');
@@ -66,6 +66,11 @@ export default function GameScreen() {
   const lastVillainSpawn = useRef(0);
   const lastBulletSpawn = useRef(0);
   const lastPipeSpawn = useRef(0);
+
+  // NEW: Frame rate control for web
+  const lastFrameTime = useRef(0);
+  const targetFPS = 60;
+  const frameInterval = 1000 / targetFPS;
 
   // Sounds
   useEffect(() => {
@@ -204,6 +209,9 @@ export default function GameScreen() {
     lastBulletSpawn.current = Date.now();
     lastPipeSpawn.current = Date.now();
 
+    // NEW: Reset frame timing
+    lastFrameTime.current = 0;
+
     overlayAnim.setValue(0);
     Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
 
@@ -253,7 +261,7 @@ export default function GameScreen() {
     return { id: Date.now(), x: width, topHeight, scored: false };
   };
 
-  // FIXED: Check if a position is safe for villain spawn (not inside pipes)
+  // Check if a position is safe for villain spawn (not inside pipes)
   const isPositionSafeForVillain = (x: number, y: number): boolean => {
     const villainLeft = x;
     const villainRight = x + VILLAIN_SIZE;
@@ -267,46 +275,94 @@ export default function GameScreen() {
       const topPipeBottom = pipe.topHeight;
       const bottomPipeTop = pipe.topHeight + pipeGap;
 
-      // Check if villain overlaps with top pipe
+      // Check if villain would spawn inside top pipe
       if (villainRight > pipeLeft && villainLeft < pipeRight) {
-        if (villainBottom > topPipeBottom - 50) {
-          // Too close to or inside top pipe
-          return false;
+        if (villainBottom < topPipeBottom) {
+          return false; // Would spawn inside top pipe
         }
       }
 
-      // Check if villain overlaps with bottom pipe
+      // Check if villain would spawn inside bottom pipe
       if (villainRight > pipeLeft && villainLeft < pipeRight) {
-        if (villainTop < bottomPipeTop + 50) {
-          // Too close to or inside bottom pipe
-          return false;
+        if (villainTop > bottomPipeTop) {
+          return false; // Would spawn inside bottom pipe
         }
       }
     }
 
-    // Check screen boundaries
-    if (x < 0 || x > width - VILLAIN_SIZE || y < 0 || y > height - VILLAIN_SIZE - 100) {
-      return false;
-    }
-
-    return true;
+    return true; // Position is safe
   };
 
-  // FIXED: Spawn villains in safe areas only - RIGHT SIDE ONLY
+  // Villains from different directions - AVOID SPAWNING INSIDE PIPES
   const generateVillain = (): Villain | null => {
-    // 100% from right side - spawn in upper playable area only
-    const safeY = Math.random() * (height - 250) + 50; // Top half to middle area
-    return {
-      id: Date.now() + Math.random(),
-      x: width,
-      y: safeY,
-      speedX: -VILLAIN_SPEED,
-      speedY: 0,
+    const directions = [
+      // From right (front) - always safe since pipes come from right
+      { x: width, y: Math.random() * (height - 200) + 100, speedX: -VILLAIN_SPEED, speedY: 0 },
+      
+      // From top - check if position is safe
+      { x: Math.random() * (width - 200) + 100, y: -VILLAIN_SIZE, speedX: 0, speedY: VILLAIN_SPEED },
+      
+      // From bottom - check if position is safe
+      { x: Math.random() * (width - 200) + 100, y: height, speedX: 0, speedY: -VILLAIN_SPEED },
+    ];
+    
+    // Try multiple times to find a safe spawn position
+    for (let attempts = 0; attempts < 10; attempts++) {
+      const direction = directions[Math.floor(Math.random() * directions.length)];
+      
+      // For bottom and top spawns, check if position is safe
+      if (direction.speedY !== 0) { // Top or bottom spawn
+        if (isPositionSafeForVillain(direction.x, direction.y)) {
+          return { 
+            id: Date.now() + Math.random(), 
+            x: direction.x, 
+            y: direction.y, 
+            speedX: direction.speedX, 
+            speedY: direction.speedY,
+            scaleAnim: new Animated.Value(1)
+          };
+        }
+      } else {
+        // Right spawn is always safe
+        return { 
+          id: Date.now() + Math.random(), 
+          x: direction.x, 
+          y: direction.y, 
+          speedX: direction.speedX, 
+          speedY: direction.speedY,
+          scaleAnim: new Animated.Value(1)
+        };
+      }
+    }
+    
+    // If no safe position found after attempts, spawn from right (always safe)
+    const safeDirection = directions[0];
+    return { 
+      id: Date.now() + Math.random(), 
+      x: safeDirection.x, 
+      y: safeDirection.y, 
+      speedX: safeDirection.speedX, 
+      speedY: safeDirection.speedY,
       scaleAnim: new Animated.Value(1)
     };
   };
 
-
+  // Spawn multiple villains at once with safe positions
+  const spawnVillainGroup = () => {
+    const groupSize = Math.floor(Math.random() * 2) + 1;
+    const newVillains: Villain[] = [];
+    
+    for (let i = 0; i < groupSize; i++) {
+      const villain = generateVillain();
+      if (villain) {
+        newVillains.push(villain);
+      }
+    }
+    
+    if (newVillains.length > 0) {
+      setVillains(prev => [...prev, ...newVillains]);
+    }
+  };
 
   const loseLife = async () => {
     const now = Date.now();
@@ -359,12 +415,23 @@ export default function GameScreen() {
     if (sound) await sound.pauseAsync();
   };
 
-  // MAIN GAME LOOP - UPDATED WITH DYNAMIC PHYSICS
+  // MAIN GAME LOOP - UPDATED WITH FRAME RATE LIMITING
   useEffect(() => {
     if (gameState !== 'playing') return;
     let rafId = 0;
 
-    const loop = () => {
+    const loop = (timestamp: number) => {
+      // NEW: Frame rate limiting for consistent speed across devices
+      if (!lastFrameTime.current) lastFrameTime.current = timestamp;
+      const deltaTime = timestamp - lastFrameTime.current;
+      
+      // Only update game logic at target FPS (60fps)
+      if (deltaTime < frameInterval) {
+        rafId = requestAnimationFrame(loop);
+        return;
+      }
+      
+      lastFrameTime.current = timestamp;
       frameCount.current++;
 
       // Clouds
@@ -405,13 +472,16 @@ export default function GameScreen() {
         lastBulletSpawn.current = now;
       }
 
-      // Villains spawn less frequently
-      const villainSpawnRate = Math.max(2500, 3500 - score * 30);
+      // Villains spawn less frequently at start
+      const villainSpawnRate = Math.max(4000, 5000 - score * 80);
       if (now - lastVillainSpawn.current > villainSpawnRate) {
-        // Spawn 1 villain at a time
-        const villain = generateVillain();
-        if (villain) {
-          setVillains(prev => [...prev, villain]);
+        if (Math.random() < 0.3) {
+          spawnVillainGroup();
+        } else {
+          const villain = generateVillain();
+          if (villain) {
+            setVillains(prev => [...prev, villain]);
+          }
         }
         lastVillainSpawn.current = now;
       }
@@ -762,6 +832,7 @@ export default function GameScreen() {
   );
 }
 
+// ... (styles remain exactly the same as previous version)
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
