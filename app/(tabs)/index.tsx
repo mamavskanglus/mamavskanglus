@@ -104,25 +104,44 @@ export default function GameScreen() {
 
     const loadAudio = async () => {
       try {
-        setAudioStatus('Loading background music from: /assets/sounds/background-music.mp3');
-        
-        const response = await fetch('/assets/sounds/background-music.mp3');
-        setAudioStatus(`Fetch response: ${response.status} ${response.statusText}`);
-        
-        if (!response.ok) {
-          setAudioStatus(`❌ File not found (${response.status}). Try these paths:\n• /public/assets/sounds/background-music.mp3\n• /assets/background-music.mp3\n• Check your public folder structure`);
+        // Your files are in: assets/sounds/background-music.mp3
+        const pathsToTry = [
+          'assets/sounds/background-music.mp3',
+          './assets/sounds/background-music.mp3',
+          '/assets/sounds/background-music.mp3',
+        ];
+
+        let response = null;
+        let successPath = null;
+
+        for (const path of pathsToTry) {
+          try {
+            setAudioStatus(`🔍 Trying: ${path}`);
+            response = await fetch(path);
+            if (response.ok) {
+              successPath = path;
+              setAudioStatus(`✅ Found at: ${path}`);
+              break;
+            }
+          } catch (e) {
+            setAudioStatus(`❌ Failed: ${path}`);
+          }
+        }
+
+        if (!response || !response.ok) {
+          setAudioStatus(`❌ All paths failed!\n\nYour files:\n• assets/sounds/background-music.mp3\n• assets/sounds/death-sound.mp3\n\nTry restarting dev server!`);
           return;
         }
 
         const arrayBuffer = await response.arrayBuffer();
-        setAudioStatus(`File loaded: ${(arrayBuffer.byteLength / 1024).toFixed(2)}KB`);
+        setAudioStatus(`📦 File size: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
 
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         cachedAudioBufferRef.current = audioBuffer;
-        setAudioStatus(`✅ Audio decoded successfully (${audioBuffer.duration.toFixed(2)}s)`);
+        setAudioStatus(`🎵 SUCCESS! Audio: ${audioBuffer.duration.toFixed(2)}s - Ready to play!`);
       } catch (error) {
-        setAudioStatus(`❌ Audio loading error: ${error}`);
-        console.error('Full error:', error);
+        setAudioStatus(`❌ Decode error: ${error}`);
+        console.error('Audio error:', error);
       }
     };
 
@@ -199,8 +218,21 @@ export default function GameScreen() {
     if (isMuted || !audioContext) return;
     
     try {
-      const response = await fetch('/assets/sounds/death-sound.mp3');
-      if (!response.ok) return;
+      const pathsToTry = [
+        'assets/sounds/death-sound.mp3',
+        './assets/sounds/death-sound.mp3',
+        '/assets/sounds/death-sound.mp3',
+      ];
+
+      let response = null;
+      for (const path of pathsToTry) {
+        try {
+          response = await fetch(path);
+          if (response.ok) break;
+        } catch (e) {}
+      }
+
+      if (!response || !response.ok) return;
       
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
