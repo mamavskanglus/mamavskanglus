@@ -1,10 +1,10 @@
-// app/index.tsx - DEPLOYMENT FIXES
+// AUDIO DEBUG VERSION - Let's figure out what's wrong
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform, Alert, ScrollView } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
-// CONSTANTS - MATCHING MOBILE EXPERIENCE
+// CONSTANTS
 const BIRD_SIZE = 60;
 const PIPE_WIDTH = 60;
 const INITIAL_PIPE_GAP = 200;
@@ -20,7 +20,7 @@ const BULLET_SIZE = 15;
 const VILLAIN_SIZE = 120;
 const VILLAIN_SPEED = 3.5;
 const PLAYABLE_TOP = 100;
-const PLAYABLE_BOTTOM = height - 130; // Account for grass + ground
+const PLAYABLE_BOTTOM = height - 130;
 
 interface Pipe { id: number; x: number; topHeight: number; scored: boolean; }
 interface Cloud { id: number; x: number; y: number; speed: number; size: number; }
@@ -51,6 +51,8 @@ export default function GameScreen() {
   const [lives, setLives] = useState(MAX_LIVES);
   const [invincible, setInvincible] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [audioStatus, setAudioStatus] = useState('Initializing...');
+  const [showDebug, setShowDebug] = useState(true);
 
   const [currentGravity, setCurrentGravity] = useState(INITIAL_GRAVITY);
   const [currentFlapStrength, setCurrentFlapStrength] = useState(INITIAL_FLAP_STRENGTH);
@@ -69,23 +71,25 @@ export default function GameScreen() {
   const targetFPS = 60;
   const frameInterval = 1000 / targetFPS;
 
-  // FIXED: Better audio handling with proper cleanup
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const backgroundMusicRef = useRef<AudioBufferSourceNode | null>(null);
   const cachedAudioBufferRef = useRef<AudioBuffer | null>(null);
 
-  // Initialize Audio
+  // Initialize Audio Context
   useEffect(() => {
     const initAudio = async () => {
       try {
+        setAudioStatus('Creating audio context...');
         const context = new (window.AudioContext || (window as any).webkitAudioContext)();
         setAudioContext(context);
+        setAudioStatus(`Audio context created: ${context.state}`);
         
         if (context.state === 'suspended') {
-          context.resume();
+          setAudioStatus('Audio suspended, will resume on user interaction');
         }
       } catch (error) {
-        console.log('Audio context creation failed:', error);
+        setAudioStatus(`❌ Audio context error: ${error}`);
+        console.error('Audio context creation failed:', error);
       }
     };
     
@@ -94,29 +98,38 @@ export default function GameScreen() {
     }
   }, []);
 
-  // FIXED: Load background music once and cache it
+  // Load Audio Files - WITH DETAILED LOGGING
   useEffect(() => {
     if (!audioContext) return;
 
-    const loadBackgroundMusic = async () => {
+    const loadAudio = async () => {
       try {
+        setAudioStatus('Loading background music from: /assets/sounds/background-music.mp3');
+        
         const response = await fetch('/assets/sounds/background-music.mp3');
+        setAudioStatus(`Fetch response: ${response.status} ${response.statusText}`);
+        
         if (!response.ok) {
-          console.warn('Audio file not found, continuing without music');
+          setAudioStatus(`❌ File not found (${response.status}). Try these paths:\n• /public/assets/sounds/background-music.mp3\n• /assets/background-music.mp3\n• Check your public folder structure`);
           return;
         }
+
         const arrayBuffer = await response.arrayBuffer();
+        setAudioStatus(`File loaded: ${(arrayBuffer.byteLength / 1024).toFixed(2)}KB`);
+
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         cachedAudioBufferRef.current = audioBuffer;
+        setAudioStatus(`✅ Audio decoded successfully (${audioBuffer.duration.toFixed(2)}s)`);
       } catch (error) {
-        console.log('Background music loading failed:', error);
+        setAudioStatus(`❌ Audio loading error: ${error}`);
+        console.error('Full error:', error);
       }
     };
 
-    loadBackgroundMusic();
+    loadAudio();
   }, [audioContext]);
 
-  // FIXED: Better audio playback control
+  // Audio Playback Control
   useEffect(() => {
     if (!audioContext || !cachedAudioBufferRef.current) return;
 
@@ -125,25 +138,27 @@ export default function GameScreen() {
     if (shouldPlay) {
       try {
         if (audioContext.state === 'suspended') {
-          audioContext.resume();
+          audioContext.resume().then(() => {
+            setAudioStatus('Audio resumed');
+          });
         }
 
-        // Stop existing source
         if (backgroundMusicRef.current) {
           try {
             backgroundMusicRef.current.stop();
           } catch (e) {}
         }
 
-        // Create and play new source
         const source = audioContext.createBufferSource();
         source.buffer = cachedAudioBufferRef.current;
         source.loop = true;
         source.connect(audioContext.destination);
         source.start(0);
         backgroundMusicRef.current = source;
+        setAudioStatus(`🔊 Playing...`);
       } catch (error) {
-        console.log('Audio playback error:', error);
+        setAudioStatus(`❌ Playback error: ${error}`);
+        console.error('Audio playback error:', error);
       }
     } else {
       if (backgroundMusicRef.current) {
@@ -152,6 +167,7 @@ export default function GameScreen() {
           backgroundMusicRef.current = null;
         } catch (e) {}
       }
+      setAudioStatus('Audio stopped');
     }
 
     return () => {
@@ -166,6 +182,17 @@ export default function GameScreen() {
 
   const toggleMute = () => {
     setIsMuted(prev => !prev);
+  };
+
+  const testAudioFile = async () => {
+    try {
+      setAudioStatus('Testing fetch to /assets/sounds/background-music.mp3...');
+      const response = await fetch('/assets/sounds/background-music.mp3');
+      const text = await response.text();
+      setAudioStatus(`Response: ${response.status}, Content length: ${text.length}`);
+    } catch (error) {
+      setAudioStatus(`Fetch test failed: ${error}`);
+    }
   };
 
   const playDeathSound = async () => {
@@ -202,7 +229,6 @@ export default function GameScreen() {
     });
   };
 
-  // Clouds
   useEffect(() => {
     const arr: Cloud[] = [];
     for (let i = 0; i < 5; i++) {
@@ -217,7 +243,6 @@ export default function GameScreen() {
     setClouds(arr);
   }, []);
 
-  // Difficulty scaling
   useEffect(() => {
     if (gameState === 'playing') {
       const lvl = Math.floor(score / 5);
@@ -304,9 +329,7 @@ export default function GameScreen() {
     return { id: Date.now(), x: width, topHeight, scored: false };
   };
 
-  // FIXED: Villain spawn - Keep within playable area
   const generateVillain = (): Villain | null => {
-    // Spawn only in playable area (not in grass/ground)
     const minY = PLAYABLE_TOP + 20;
     const maxY = PLAYABLE_BOTTOM - VILLAIN_SIZE - 20;
     
@@ -314,7 +337,6 @@ export default function GameScreen() {
     
     const y = Math.random() * (maxY - minY) + minY;
     
-    // Check if this Y position is clear of pipes
     let isClear = true;
     for (const pipe of pipes) {
       const pipeRight = pipe.x + PIPE_WIDTH;
@@ -323,7 +345,6 @@ export default function GameScreen() {
       
       if (pipeRight > width - 200) {
         const villainBottom = y + VILLAIN_SIZE;
-        // Check if villain would collide with pipes
         if ((y < pipeGapTop - 100 || villainBottom > pipeGapBottom + 100)) {
           isClear = false;
           break;
@@ -402,7 +423,6 @@ export default function GameScreen() {
     if (score > highScore) setHighScore(score);
   };
 
-  // FIXED: Optimized game loop with consistent physics and villain spawn fix
   useEffect(() => {
     if (gameState !== 'playing') return;
     let rafId = 0;
@@ -419,12 +439,10 @@ export default function GameScreen() {
       lastFrameTime.current = timestamp;
       frameCount.current++;
 
-      // Clouds
       if (frameCount.current % 2 === 0) {
         setClouds(prev => prev.map(c => ({ ...c, x: c.x - c.speed })).filter(c => c.x > -CLOUD_WIDTH));
       }
 
-      // Bird physics
       birdVelocity.current += currentGravity;
       setBirdY(prev => {
         const newY = prev + birdVelocity.current;
@@ -437,36 +455,30 @@ export default function GameScreen() {
 
       const now = Date.now();
       
-      // Pipe spawning
       if (now - lastPipeSpawn.current > 1800) {
         setPipes(prev => [...prev, generatePipe()]);
         lastPipeSpawn.current = now;
       }
 
-      // Faster shooting
       if (now - lastBulletSpawn.current > 400) {
         autoShoot();
         lastBulletSpawn.current = now;
       }
 
-      // FIXED: More aggressive villain spawning - every 2-3 seconds
-      const villainSpawnRate = 2500; // Fixed 2.5 seconds spawn rate
+      const villainSpawnRate = 2500;
       if (now - lastVillainSpawn.current > villainSpawnRate) {
         spawnVillainGroup();
         lastVillainSpawn.current = now;
       }
 
-      // Move bullets
       setBullets(prev => {
         const moved = prev.map(b => ({ ...b, x: b.x + BULLET_SPEED }));
         return moved.filter(b => b.x < width + 50);
       });
 
-      // Move villains - constrain to playable area
       setVillains(prev => 
         prev.map(v => {
           let newY = v.y + v.speedY;
-          // Keep villains in playable area
           newY = Math.max(PLAYABLE_TOP, Math.min(newY, PLAYABLE_BOTTOM - VILLAIN_SIZE));
           return { 
             ...v,
@@ -476,7 +488,6 @@ export default function GameScreen() {
         }).filter(v => v.x > -VILLAIN_SIZE * 2)
       );
 
-      // Move pipes and handle collisions
       setPipes(prev => {
         const newPipes = prev.map(p => ({ ...p, x: p.x - pipeSpeed }));
         newPipes.forEach(pipe => {
@@ -502,7 +513,6 @@ export default function GameScreen() {
         return newPipes.filter(p => p.x > -PIPE_WIDTH);
       });
 
-      // Bullet-villain collisions
       setBullets(prevBullets => {
         const remainingBullets = [...prevBullets];
         const hitVillainIds = new Set<number>();
@@ -553,7 +563,6 @@ export default function GameScreen() {
         return remainingBullets;
       });
 
-      // Villain-bird collisions
       setVillains(prev => {
         const arr = [...prev];
         arr.forEach((villain) => {
@@ -622,6 +631,24 @@ export default function GameScreen() {
       <View style={styles.container}>
         {renderClouds()}
         <Text style={styles.title}>MAMA vs BANGLADESHI MIYA</Text>
+        
+        {showDebug && (
+          <View style={styles.debugBox}>
+            <View style={styles.debugHeader}>
+              <Text style={styles.debugTitle}>🔧 AUDIO DEBUG</Text>
+              <TouchableOpacity onPress={() => setShowDebug(false)}>
+                <Text style={styles.debugClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.debugContent}>
+              <Text style={styles.debugText}>{audioStatus}</Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.debugButton} onPress={testAudioFile}>
+              <Text style={styles.debugButtonText}>Test Audio File</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.highScoreContainer}>
           <Text style={styles.highScoreLabel}>HIGH SCORE</Text>
           <Text style={styles.highScoreValue}>{highScore}</Text>
@@ -818,9 +845,55 @@ const styles = StyleSheet.create({
     fontSize: 42, 
     fontWeight: 'bold', 
     color: '#FFD700', 
-    marginBottom: 30, 
+    marginBottom: 20, 
     textAlign: 'center', 
     zIndex: 10 
+  },
+  debugBox: {
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    width: '100%',
+    maxHeight: 200,
+    borderWidth: 2,
+    borderColor: '#FF6B6B'
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10
+  },
+  debugTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFD700'
+  },
+  debugClose: {
+    fontSize: 18,
+    color: '#FF6B6B'
+  },
+  debugContent: {
+    maxHeight: 120,
+    marginBottom: 10
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#00FF00',
+    fontFamily: 'monospace',
+    lineHeight: 18
+  },
+  debugButton: {
+    backgroundColor: '#FF6B6B',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center'
+  },
+  debugButtonText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white'
   },
   highScoreContainer: { 
     backgroundColor: 'rgba(255,255,255,0.9)', 
@@ -868,12 +941,12 @@ const styles = StyleSheet.create({
     color: 'white' 
   },
   instructions: { 
-    marginTop: 30, 
-    fontSize: 16, 
+    marginTop: 20, 
+    fontSize: 14, 
     color: '#fff', 
     textAlign: 'center', 
     fontStyle: 'italic', 
-    lineHeight: 22, 
+    lineHeight: 20, 
     zIndex: 10 
   },
   countdownOverlay: { 
