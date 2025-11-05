@@ -1,4 +1,4 @@
-// DEPLOYMENT READY VERSION - Audio files in public folder
+// DEPLOYMENT READY VERSION - Fixed image paths
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform, Alert, ScrollView } from 'react-native';
 
@@ -52,7 +52,7 @@ export default function GameScreen() {
   const [invincible, setInvincible] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [audioStatus, setAudioStatus] = useState('Initializing...');
-  const [showDebug, setShowDebug] = useState(false); // Turn off debug by default
+  const [showDebug, setShowDebug] = useState(false);
 
   const [currentGravity, setCurrentGravity] = useState(INITIAL_GRAVITY);
   const [currentFlapStrength, setCurrentFlapStrength] = useState(INITIAL_FLAP_STRENGTH);
@@ -747,7 +747,7 @@ export default function GameScreen() {
       <MuteButton />
 
       <Animated.Image
-        source={require('../../public/images/head.png')}
+        source={require('../../assets/images/head.png')} // KEEP assets path for images
         style={[
           styles.birdImage,
           { 
@@ -775,7 +775,7 @@ export default function GameScreen() {
       {villains.map(v => (
         <Animated.Image 
           key={v.id} 
-          source={require('../../public/images/friends.png')} 
+          source={require('../../assets/images/friends.png')} // KEEP assets path for images
           style={[
             styles.villain, 
             { 
