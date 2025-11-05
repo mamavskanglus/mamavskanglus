@@ -1,4 +1,4 @@
-// AUDIO DEBUG VERSION - Let's figure out what's wrong
+// DEPLOYMENT READY VERSION - Audio files in public folder
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform, Alert, ScrollView } from 'react-native';
 
@@ -52,7 +52,7 @@ export default function GameScreen() {
   const [invincible, setInvincible] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [audioStatus, setAudioStatus] = useState('Initializing...');
-  const [showDebug, setShowDebug] = useState(true);
+  const [showDebug, setShowDebug] = useState(false); // Turn off debug by default
 
   const [currentGravity, setCurrentGravity] = useState(INITIAL_GRAVITY);
   const [currentFlapStrength, setCurrentFlapStrength] = useState(INITIAL_FLAP_STRENGTH);
@@ -98,17 +98,18 @@ export default function GameScreen() {
     }
   }, []);
 
-  // Load Audio Files - WITH DETAILED LOGGING
+  // Load Audio Files - USING PUBLIC FOLDER PATHS
   useEffect(() => {
     if (!audioContext) return;
 
     const loadAudio = async () => {
       try {
-        // Your files are in: assets/sounds/background-music.mp3
+        // Paths relative to public folder
         const pathsToTry = [
-          'assets/sounds/background-music.mp3',
-          './assets/sounds/background-music.mp3',
-          '/assets/sounds/background-music.mp3',
+          '/sounds/background-music.mp3',
+          './sounds/background-music.mp3',
+          'sounds/background-music.mp3',
+          `${window.location.origin}/sounds/background-music.mp3`,
         ];
 
         let response = null;
@@ -116,32 +117,31 @@ export default function GameScreen() {
 
         for (const path of pathsToTry) {
           try {
-            setAudioStatus(`🔍 Trying: ${path}`);
+            setAudioStatus(`Trying: ${path}`);
             response = await fetch(path);
             if (response.ok) {
               successPath = path;
-              setAudioStatus(`✅ Found at: ${path}`);
+              setAudioStatus(`✅ Audio loaded from: ${path}`);
               break;
             }
           } catch (e) {
-            setAudioStatus(`❌ Failed: ${path}`);
+            console.log(`Failed: ${path}`);
           }
         }
 
         if (!response || !response.ok) {
-          setAudioStatus(`❌ All paths failed!\n\nYour files:\n• assets/sounds/background-music.mp3\n• assets/sounds/death-sound.mp3\n\nTry restarting dev server!`);
+          setAudioStatus('❌ Audio file not found. Please check public/sounds/ folder.');
           return;
         }
 
         const arrayBuffer = await response.arrayBuffer();
-        setAudioStatus(`📦 File size: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
-
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         cachedAudioBufferRef.current = audioBuffer;
-        setAudioStatus(`🎵 SUCCESS! Audio: ${audioBuffer.duration.toFixed(2)}s - Ready to play!`);
+        setAudioStatus('🎵 Audio ready!');
+
       } catch (error) {
-        setAudioStatus(`❌ Decode error: ${error}`);
-        console.error('Audio error:', error);
+        setAudioStatus(`❌ Audio error: ${error}`);
+        console.error('Audio loading failed:', error);
       }
     };
 
@@ -158,7 +158,7 @@ export default function GameScreen() {
       try {
         if (audioContext.state === 'suspended') {
           audioContext.resume().then(() => {
-            setAudioStatus('Audio resumed');
+            console.log('Audio resumed');
           });
         }
 
@@ -174,9 +174,8 @@ export default function GameScreen() {
         source.connect(audioContext.destination);
         source.start(0);
         backgroundMusicRef.current = source;
-        setAudioStatus(`🔊 Playing...`);
+        console.log('Background music playing');
       } catch (error) {
-        setAudioStatus(`❌ Playback error: ${error}`);
         console.error('Audio playback error:', error);
       }
     } else {
@@ -186,7 +185,6 @@ export default function GameScreen() {
           backgroundMusicRef.current = null;
         } catch (e) {}
       }
-      setAudioStatus('Audio stopped');
     }
 
     return () => {
@@ -205,12 +203,30 @@ export default function GameScreen() {
 
   const testAudioFile = async () => {
     try {
-      setAudioStatus('Testing fetch to /assets/sounds/background-music.mp3...');
-      const response = await fetch('/assets/sounds/background-music.mp3');
-      const text = await response.text();
-      setAudioStatus(`Response: ${response.status}, Content length: ${text.length}`);
+      setAudioStatus('Testing audio file access...');
+      
+      const testPaths = [
+        '/sounds/background-music.mp3',
+        './sounds/background-music.mp3',
+        'sounds/background-music.mp3',
+      ];
+
+      for (const path of testPaths) {
+        try {
+          const response = await fetch(path);
+          setAudioStatus(prev => prev + `\n${path}: ${response.status} ${response.statusText}`);
+          
+          if (response.ok) {
+            const content = await response.blob();
+            setAudioStatus(prev => prev + ` ✅ (${(content.size / 1024).toFixed(1)}KB)`);
+            break;
+          }
+        } catch (error) {
+          setAudioStatus(prev => prev + ` ❌`);
+        }
+      }
     } catch (error) {
-      setAudioStatus(`Fetch test failed: ${error}`);
+      setAudioStatus(`Test failed: ${error}`);
     }
   };
 
@@ -219,9 +235,9 @@ export default function GameScreen() {
     
     try {
       const pathsToTry = [
-        'assets/sounds/death-sound.mp3',
-        './assets/sounds/death-sound.mp3',
-        '/assets/sounds/death-sound.mp3',
+        '/sounds/death-sound.mp3',
+        './sounds/death-sound.mp3',
+        'sounds/death-sound.mp3',
       ];
 
       let response = null;
@@ -678,6 +694,9 @@ export default function GameScreen() {
             <TouchableOpacity style={styles.debugButton} onPress={testAudioFile}>
               <Text style={styles.debugButtonText}>Test Audio File</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.debugButton} onPress={() => setShowDebug(false)}>
+              <Text style={styles.debugButtonText}>Hide Debug</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -691,6 +710,9 @@ export default function GameScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.quitButton} onPress={quitGame}>
             <Text style={styles.buttonText}>✕ QUIT</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.debugToggleButton} onPress={() => setShowDebug(!showDebug)}>
+            <Text style={styles.debugToggleButtonText}>{showDebug ? '🔧 HIDE DEBUG' : '🔧 SHOW DEBUG'}</Text>
           </TouchableOpacity>
         </View>
         <Text style={styles.instructions}>
@@ -725,7 +747,7 @@ export default function GameScreen() {
       <MuteButton />
 
       <Animated.Image
-        source={require('../../assets/images/head.png')}
+        source={require('../../public/images/head.png')}
         style={[
           styles.birdImage,
           { 
@@ -753,7 +775,7 @@ export default function GameScreen() {
       {villains.map(v => (
         <Animated.Image 
           key={v.id} 
-          source={require('../../assets/images/friends.png')} 
+          source={require('../../public/images/friends.png')} 
           style={[
             styles.villain, 
             { 
@@ -920,10 +942,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF6B6B',
     paddingVertical: 8,
     borderRadius: 8,
-    alignItems: 'center'
+    alignItems: 'center',
+    marginBottom: 5
   },
   debugButtonText: {
     fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white'
+  },
+  debugToggleButton: {
+    backgroundColor: '#666',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 10
+  },
+  debugToggleButtonText: {
+    fontSize: 14,
     fontWeight: 'bold',
     color: 'white'
   },
