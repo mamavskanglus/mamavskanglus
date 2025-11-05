@@ -1,4 +1,4 @@
-// FINAL PRODUCT VERSION - Balanced for all devices
+// FINAL PRODUCT VERSION - Increased villain spawn rate
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
 
@@ -8,23 +8,23 @@ const { width, height } = Dimensions.get('window');
 const BIRD_SIZE = 60;
 const PIPE_WIDTH = 60;
 const INITIAL_PIPE_GAP = 200;
-const INITIAL_GRAVITY = Platform.OS === 'web' ? 0.5 : 0.4; // Slightly less gravity for mobile
-const INITIAL_FLAP_STRENGTH = Platform.OS === 'web' ? -8 : -9; // Stronger flap for mobile
-const INITIAL_PIPE_SPEED = 3.0; // Reduced from 3.5
+const INITIAL_GRAVITY = Platform.OS === 'web' ? 0.5 : 0.4;
+const INITIAL_FLAP_STRENGTH = Platform.OS === 'web' ? -8 : -9;
+const INITIAL_PIPE_SPEED = 3.0;
 const MAX_LIVES = 3;
 const CLOUD_WIDTH = 100;
 const CLOUD_HEIGHT = 60;
 const GRASS_HEIGHT = 30;
-const BULLET_SPEED = 10; // Reduced from 12
+const BULLET_SPEED = 10;
 const BULLET_SIZE = 15;
 const VILLAIN_SIZE = 120;
-const VILLAIN_SPEED = 3.0; // Reduced from 3.5
+const VILLAIN_SPEED = 3.0;
 const PLAYABLE_TOP = 100;
 const PLAYABLE_BOTTOM = height - 130;
 
 // TOUCH OPTIMIZATION
-const TAP_DEBOUNCE = 100; // Prevent rapid taps
-const FLAP_COOLDOWN = 50; // Minimum time between flaps
+const TAP_DEBOUNCE = 100;
+const FLAP_COOLDOWN = 50;
 
 interface Pipe { id: number; x: number; topHeight: number; scored: boolean; }
 interface Cloud { id: number; x: number; y: number; speed: number; size: number; }
@@ -68,7 +68,7 @@ export default function GameScreen() {
   const lastVillainSpawn = useRef(0);
   const lastBulletSpawn = useRef(0);
   const lastPipeSpawn = useRef(0);
-  const lastFlapTime = useRef(0); // For flap cooldown
+  const lastFlapTime = useRef(0);
 
   const lastFrameTime = useRef(0);
   const targetFPS = 60;
@@ -246,12 +246,10 @@ export default function GameScreen() {
     if (gameState === 'playing') {
       const lvl = Math.floor(score / 5);
       
-      // Reduced speed progression
-      setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.1); // Reduced from 0.15
-      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 2)); // Reduced from 3
+      setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.1);
+      setPipeGap(Math.max(180, INITIAL_PIPE_GAP - lvl * 2));
       
-      // Reduced speed multiplier
-      const speedMultiplier = 1 + (lvl * 0.1); // Reduced from 0.15
+      const speedMultiplier = 1 + (lvl * 0.1);
       setCurrentGravity(INITIAL_GRAVITY * speedMultiplier);
       setCurrentFlapStrength(INITIAL_FLAP_STRENGTH * speedMultiplier);
     }
@@ -305,7 +303,6 @@ export default function GameScreen() {
     if (gameState === 'playing') {
       const now = Date.now();
       
-      // Prevent rapid tapping and allow smooth control
       if (now - lastFlapTime.current > FLAP_COOLDOWN) {
         birdVelocity.current = currentFlapStrength;
         lastFlapTime.current = now;
@@ -375,9 +372,14 @@ export default function GameScreen() {
   };
 
   const spawnVillainGroup = () => {
-    const villain = generateVillain();
-    if (villain) {
-      setVillains(prev => [...prev, villain]);
+    // Spawn 1-2 villains at a time for more action
+    const villainCount = Math.random() > 0.7 ? 2 : 1;
+    
+    for (let i = 0; i < villainCount; i++) {
+      const villain = generateVillain();
+      if (villain) {
+        setVillains(prev => [...prev, villain]);
+      }
     }
   };
 
@@ -468,13 +470,13 @@ export default function GameScreen() {
         lastPipeSpawn.current = now;
       }
 
-      // Reduced firing rate from 400ms to 600ms
       if (now - lastBulletSpawn.current > 600) {
         autoShoot();
         lastBulletSpawn.current = now;
       }
 
-      const villainSpawnRate = 2800; // Increased from 2500
+      // INCREASED VILLAIN SPAWN RATE - from 2800ms to 2000ms
+      const villainSpawnRate = 2000;
       if (now - lastVillainSpawn.current > villainSpawnRate) {
         spawnVillainGroup();
         lastVillainSpawn.current = now;
@@ -655,7 +657,7 @@ export default function GameScreen() {
         </View>
         <Text style={styles.instructions}>
           Tap to flap • Auto-shooting enabled • Avoid pillars and villains!{'\n'}
-          Optimized for all devices - Smooth gameplay!
+          More villains for extra challenge!
         </Text>
         <MuteButton />
       </View>
@@ -667,7 +669,7 @@ export default function GameScreen() {
       style={styles.gameContainer} 
       activeOpacity={1} 
       onPress={flap}
-      delayPressIn={0} // iOS touch optimization
+      delayPressIn={0}
     >
       <View style={styles.skyBackground} />
       {renderClouds()}
