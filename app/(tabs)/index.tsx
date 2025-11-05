@@ -1,4 +1,4 @@
-// app/index.tsx - WITH FRAME RATE LIMITING FOR WEB
+// app/index.tsx - COMPREHENSIVE FIXES
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Dimensions, Animated, Image, Platform } from 'react-native';
 import { Audio } from 'expo-av';
@@ -67,26 +67,45 @@ export default function GameScreen() {
   const lastBulletSpawn = useRef(0);
   const lastPipeSpawn = useRef(0);
 
-  // NEW: Frame rate control for web
+  // Frame rate control
   const lastFrameTime = useRef(0);
   const targetFPS = 60;
   const frameInterval = 1000 / targetFPS;
 
-  // Sounds
+  // FIX 1: Web Audio Support
+  const [webAudio, setWebAudio] = useState<HTMLAudioElement | null>(null);
+  const [webDeathAudio, setWebDeathAudio] = useState<HTMLAudioElement | null>(null);
+
+  // Audio initialization
   useEffect(() => {
     const loadSounds = async () => {
       try {
-        const { sound: bg } = await Audio.Sound.createAsync(
-          require('../../assets/sounds/background-music.mp3'),
-          { shouldPlay: true, isLooping: true, volume: 0.3 }
-        );
-        setSound(bg);
+        if (Platform.OS === 'web') {
+          // Web audio solution
+          const bgAudio = new Audio();
+          bgAudio.src = '/assets/sounds/background-music.mp3';
+          bgAudio.loop = true;
+          bgAudio.volume = 0.3;
+          setWebAudio(bgAudio);
 
-        const { sound: deathSfx } = await Audio.Sound.createAsync(
-          require('../../assets/sounds/death-sound.mp3'),
-          { shouldPlay: false, volume: 0.7 }
-        );
-        setDeathSound(deathSfx);
+          const deathAudio = new Audio();
+          deathAudio.src = '/assets/sounds/death-sound.mp3';
+          deathAudio.volume = 0.7;
+          setWebDeathAudio(deathAudio);
+        } else {
+          // Mobile audio solution
+          const { sound: bg } = await Audio.Sound.createAsync(
+            require('../../assets/sounds/background-music.mp3'),
+            { shouldPlay: true, isLooping: true, volume: 0.3 }
+          );
+          setSound(bg);
+
+          const { sound: deathSfx } = await Audio.Sound.createAsync(
+            require('../../assets/sounds/death-sound.mp3'),
+            { shouldPlay: false, volume: 0.7 }
+          );
+          setDeathSound(deathSfx);
+        }
       } catch (e) {
         console.log('Error loading sounds', e);
       }
@@ -99,38 +118,65 @@ export default function GameScreen() {
     };
   }, []);
 
+  // Audio control
   useEffect(() => {
     const control = async () => {
-      if (!sound) return;
-      if ((gameState === 'playing' || gameState === 'countdown') && !isMuted) {
-        await sound.playAsync();
-        await sound.setVolumeAsync(0.3);
+      if (Platform.OS === 'web') {
+        if (webAudio) {
+          if ((gameState === 'playing' || gameState === 'countdown') && !isMuted) {
+            await webAudio.play();
+            webAudio.volume = 0.3;
+          } else {
+            webAudio.pause();
+          }
+        }
       } else {
-        await sound.pauseAsync();
+        if (!sound) return;
+        if ((gameState === 'playing' || gameState === 'countdown') && !isMuted) {
+          await sound.playAsync();
+          await sound.setVolumeAsync(0.3);
+        } else {
+          await sound.pauseAsync();
+        }
       }
     };
     control();
-  }, [gameState, sound, isMuted]);
+  }, [gameState, sound, webAudio, isMuted]);
 
   const toggleMute = async () => {
     setIsMuted(prev => !prev);
-    if (sound) {
-      if (isMuted) {
-        if (gameState === 'playing' || gameState === 'countdown') await sound.playAsync();
-        await sound.setVolumeAsync(0.3);
-      } else {
-        await sound.setVolumeAsync(0);
+    if (Platform.OS === 'web') {
+      if (webAudio) {
+        webAudio.volume = isMuted ? 0.3 : 0;
+      }
+    } else {
+      if (sound) {
+        if (isMuted) {
+          if (gameState === 'playing' || gameState === 'countdown') await sound.playAsync();
+          await sound.setVolumeAsync(0.3);
+        } else {
+          await sound.setVolumeAsync(0);
+        }
       }
     }
   };
 
   const playDeathSound = async () => {
-    if (deathSound && !isMuted) {
-      try {
-        await deathSound.stopAsync();
-        await deathSound.setPositionAsync(0);
-        await deathSound.playAsync();
-      } catch (e) { console.log(e); }
+    if (isMuted) return;
+    
+    if (Platform.OS === 'web') {
+      if (webDeathAudio) {
+        webDeathAudio.currentTime = 0;
+        await webDeathAudio.play();
+      }
+    } else {
+      if (deathSound) {
+        try {
+          await deathSound.stopAsync();
+          await deathSound.setPositionAsync(0);
+          await deathSound.playAsync();
+        } catch (e) { console.log(e); }
+      }
     }
   };
 
@@ -165,18 +211,16 @@ export default function GameScreen() {
     setClouds(arr);
   }, []);
 
-  // Gradual difficulty scaling - INCLUDING CHARACTER SPEED
+  // Gradual difficulty scaling
   useEffect(() => {
     if (gameState === 'playing') {
       const lvl = Math.floor(score / 10);
       
-      // Increase pipe speed and difficulty
       setPipeSpeed(INITIAL_PIPE_SPEED + lvl * 0.08);
       setPipeGap(Math.max(260, INITIAL_PIPE_GAP - lvl * 2));
       setPipeFrequency(Math.max(160, 200 - lvl * 2));
       
-      // Gradually increase character speed and responsiveness
-      const speedMultiplier = 1 + (lvl * 0.1); // 10% increase per level
+      const speedMultiplier = 1 + (lvl * 0.1);
       setCurrentGravity(INITIAL_GRAVITY * speedMultiplier);
       setCurrentFlapStrength(INITIAL_FLAP_STRENGTH * speedMultiplier);
     }
@@ -194,7 +238,6 @@ export default function GameScreen() {
     frameCount.current = 0;
     passedPipes.current = new Set();
     
-    // Reset character physics to initial values
     setPipeSpeed(INITIAL_PIPE_SPEED);
     setPipeGap(INITIAL_PIPE_GAP);
     setPipeFrequency(200);
@@ -209,7 +252,6 @@ export default function GameScreen() {
     lastBulletSpawn.current = Date.now();
     lastPipeSpawn.current = Date.now();
 
-    // NEW: Reset frame timing
     lastFrameTime.current = 0;
 
     overlayAnim.setValue(0);
@@ -230,7 +272,6 @@ export default function GameScreen() {
 
   const flap = () => {
     if (gameState === 'playing') {
-      // Use dynamic flap strength that increases with score
       birdVelocity.current = currentFlapStrength;
     }
   };
@@ -248,7 +289,11 @@ export default function GameScreen() {
   };
 
   const quitGame = async () => {
-    if (sound) await sound.stopAsync();
+    if (Platform.OS === 'web') {
+      if (webAudio) webAudio.pause();
+    } else {
+      if (sound) await sound.stopAsync();
+    }
     setGameState('menu');
     overlayAnim.setValue(0);
   };
@@ -261,106 +306,59 @@ export default function GameScreen() {
     return { id: Date.now(), x: width, topHeight, scored: false };
   };
 
-  // Check if a position is safe for villain spawn (not inside pipes)
-  const isPositionSafeForVillain = (x: number, y: number): boolean => {
-    const villainLeft = x;
-    const villainRight = x + VILLAIN_SIZE;
-    const villainTop = y;
-    const villainBottom = y + VILLAIN_SIZE;
-
-    // Check collision with all pipes
-    for (const pipe of pipes) {
-      const pipeLeft = pipe.x;
-      const pipeRight = pipe.x + PIPE_WIDTH;
-      const topPipeBottom = pipe.topHeight;
-      const bottomPipeTop = pipe.topHeight + pipeGap;
-
-      // Check if villain would spawn inside top pipe
-      if (villainRight > pipeLeft && villainLeft < pipeRight) {
-        if (villainBottom < topPipeBottom) {
-          return false; // Would spawn inside top pipe
-        }
-      }
-
-      // Check if villain would spawn inside bottom pipe
-      if (villainRight > pipeLeft && villainLeft < pipeRight) {
-        if (villainTop > bottomPipeTop) {
-          return false; // Would spawn inside bottom pipe
-        }
-      }
-    }
-
-    return true; // Position is safe
-  };
-
-  // Villains from different directions - AVOID SPAWNING INSIDE PIPES
+  // FIX 2: Better villain spawn logic
   const generateVillain = (): Villain | null => {
-    const directions = [
-      // From right (front) - always safe since pipes come from right
-      { x: width, y: Math.random() * (height - 200) + 100, speedX: -VILLAIN_SPEED, speedY: 0 },
-      
-      // From top - check if position is safe
-      { x: Math.random() * (width - 200) + 100, y: -VILLAIN_SIZE, speedX: 0, speedY: VILLAIN_SPEED },
-      
-      // From bottom - check if position is safe
-      { x: Math.random() * (width - 200) + 100, y: height, speedX: 0, speedY: -VILLAIN_SPEED },
-    ];
+    const safeZones = [];
     
-    // Try multiple times to find a safe spawn position
-    for (let attempts = 0; attempts < 10; attempts++) {
-      const direction = directions[Math.floor(Math.random() * directions.length)];
+    // Define safe spawn zones (avoid pipes and ground)
+    for (let i = 0; i < 5; i++) {
+      const x = width + Math.random() * 100;
+      const y = Math.random() * (height - 200) + 100; // Avoid top and bottom edges
       
-      // For bottom and top spawns, check if position is safe
-      if (direction.speedY !== 0) { // Top or bottom spawn
-        if (isPositionSafeForVillain(direction.x, direction.y)) {
-          return { 
-            id: Date.now() + Math.random(), 
-            x: direction.x, 
-            y: direction.y, 
-            speedX: direction.speedX, 
-            speedY: direction.speedY,
-            scaleAnim: new Animated.Value(1)
-          };
+      // Check if this position is safe from pipes
+      let isSafe = true;
+      for (const pipe of pipes) {
+        const pipeRight = pipe.x + PIPE_WIDTH;
+        const pipeGapTop = pipe.topHeight;
+        const pipeGapBottom = pipe.topHeight + pipeGap;
+        
+        // Check if villain would spawn inside or too close to pipes
+        if (x < pipeRight + 100 && // 100px buffer
+            ((y < pipeGapTop - 50) || (y + VILLAIN_SIZE > pipeGapBottom + 50))) {
+          isSafe = false;
+          break;
         }
-      } else {
-        // Right spawn is always safe
-        return { 
-          id: Date.now() + Math.random(), 
-          x: direction.x, 
-          y: direction.y, 
-          speedX: direction.speedX, 
-          speedY: direction.speedY,
-          scaleAnim: new Animated.Value(1)
-        };
+      }
+      
+      // Also avoid ground
+      if (y + VILLAIN_SIZE > height - 150) {
+        isSafe = false;
+      }
+      
+      if (isSafe) {
+        safeZones.push({ x, y });
       }
     }
     
-    // If no safe position found after attempts, spawn from right (always safe)
-    const safeDirection = directions[0];
-    return { 
-      id: Date.now() + Math.random(), 
-      x: safeDirection.x, 
-      y: safeDirection.y, 
-      speedX: safeDirection.speedX, 
-      speedY: safeDirection.speedY,
-      scaleAnim: new Animated.Value(1)
-    };
+    if (safeZones.length > 0) {
+      const spawn = safeZones[Math.floor(Math.random() * safeZones.length)];
+      return {
+        id: Date.now() + Math.random(),
+        x: spawn.x,
+        y: spawn.y,
+        speedX: -VILLAIN_SPEED,
+        speedY: 0,
+        scaleAnim: new Animated.Value(1)
+      };
+    }
+    
+    return null;
   };
 
-  // Spawn multiple villains at once with safe positions
   const spawnVillainGroup = () => {
-    const groupSize = Math.floor(Math.random() * 2) + 1;
-    const newVillains: Villain[] = [];
-    
-    for (let i = 0; i < groupSize; i++) {
-      const villain = generateVillain();
-      if (villain) {
-        newVillains.push(villain);
-      }
-    }
-    
-    if (newVillains.length > 0) {
-      setVillains(prev => [...prev, ...newVillains]);
+    const villain = generateVillain();
+    if (villain) {
+      setVillains(prev => [...prev, villain]);
     }
   };
 
@@ -412,20 +410,23 @@ export default function GameScreen() {
   const endGame = async () => {
     setGameState('gameover');
     if (score > highScore) setHighScore(score);
-    if (sound) await sound.pauseAsync();
+    if (Platform.OS === 'web') {
+      if (webAudio) webAudio.pause();
+    } else {
+      if (sound) await sound.pauseAsync();
+    }
   };
 
-  // MAIN GAME LOOP - UPDATED WITH FRAME RATE LIMITING
+  // FIX 3: Optimized Game Loop with Performance Improvements
   useEffect(() => {
     if (gameState !== 'playing') return;
     let rafId = 0;
 
     const loop = (timestamp: number) => {
-      // NEW: Frame rate limiting for consistent speed across devices
+      // Frame rate limiting
       if (!lastFrameTime.current) lastFrameTime.current = timestamp;
       const deltaTime = timestamp - lastFrameTime.current;
       
-      // Only update game logic at target FPS (60fps)
       if (deltaTime < frameInterval) {
         rafId = requestAnimationFrame(loop);
         return;
@@ -434,21 +435,12 @@ export default function GameScreen() {
       lastFrameTime.current = timestamp;
       frameCount.current++;
 
-      // Clouds
-      setClouds(prev => prev.map(c => ({ ...c, x: c.x - c.speed })).filter(c => c.x > -CLOUD_WIDTH)
-        .concat(prev.filter(c => c.x <= -CLOUD_WIDTH).length === 0 && Math.random() < 0.02
-          ? [{ 
-              id: Date.now() + Math.random(), 
-              x: width, 
-              y: Math.random() * (height / 3) + 50, 
-              speed: 0.5 + Math.random(), 
-              size: 0.8 + Math.random() * 0.4 
-            }]
-          : []
-        )
-      );
+      // Optimized clouds update (less frequent)
+      if (frameCount.current % 3 === 0) {
+        setClouds(prev => prev.map(c => ({ ...c, x: c.x - c.speed })).filter(c => c.x > -CLOUD_WIDTH));
+      }
 
-      // Bird physics with dynamic gravity
+      // Bird physics
       birdVelocity.current += currentGravity;
       setBirdY(prev => {
         const newY = prev + birdVelocity.current;
@@ -459,51 +451,41 @@ export default function GameScreen() {
         return newY;
       });
 
-      // Pipes - spawn less frequently
+      // Pipes
       const now = Date.now();
       if (now - lastPipeSpawn.current > 2500) {
         setPipes(prev => [...prev, generatePipe()]);
         lastPipeSpawn.current = now;
       }
 
-      // AUTO-SHOOT: Fire bullets automatically every 500ms
+      // AUTO-SHOOT
       if (now - lastBulletSpawn.current > 500) {
         autoShoot();
         lastBulletSpawn.current = now;
       }
 
-      // Villains spawn less frequently at start
-      const villainSpawnRate = Math.max(4000, 5000 - score * 80);
+      // Villains - spawn less frequently for better performance
+      const villainSpawnRate = Math.max(5000, 6000 - score * 80);
       if (now - lastVillainSpawn.current > villainSpawnRate) {
-        if (Math.random() < 0.3) {
+        if (Math.random() < 0.4) {
           spawnVillainGroup();
-        } else {
-          const villain = generateVillain();
-          if (villain) {
-            setVillains(prev => [...prev, villain]);
-          }
         }
         lastVillainSpawn.current = now;
       }
 
-      // Move bullets in straight line
+      // Move bullets
       setBullets(prev => {
         const moved = prev.map(b => ({ ...b, x: b.x + BULLET_SPEED }));
-        return moved.filter(b => b.x < width + 50 && b.x > -50 && b.y > -50 && b.y < height + 50);
+        return moved.filter(b => b.x < width + 50);
       });
 
-      // Move villains from different directions
+      // Move villains
       setVillains(prev => 
         prev.map(v => ({ 
           ...v, 
           x: v.x + v.speedX, 
           y: v.y + v.speedY 
-        })).filter(v => 
-          v.x > -VILLAIN_SIZE * 2 && 
-          v.x < width + VILLAIN_SIZE * 2 && 
-          v.y > -VILLAIN_SIZE * 2 && 
-          v.y < height + VILLAIN_SIZE * 2
-        )
+        })).filter(v => v.x > -VILLAIN_SIZE * 2)
       );
 
       // Move pipes and handle collisions
@@ -532,7 +514,7 @@ export default function GameScreen() {
         return newPipes.filter(p => p.x > -PIPE_WIDTH);
       });
 
-      // Bullet-villain collisions with effects
+      // Bullet-villain collisions
       setBullets(prevBullets => {
         const remainingBullets = [...prevBullets];
         const hitVillainIds = new Set<number>();
@@ -540,7 +522,7 @@ export default function GameScreen() {
         setVillains(prevVillains => {
           const remainingVillains = [...prevVillains];
           
-          remainingBullets.forEach((bullet, bulletIndex) => {
+          remainingBullets.forEach((bullet) => {
             remainingVillains.forEach((villain) => {
               const bulletRight = bullet.x + BULLET_SIZE;
               const bulletBottom = bullet.y + BULLET_SIZE;
@@ -586,7 +568,7 @@ export default function GameScreen() {
       // Villain-bird collisions
       setVillains(prev => {
         const arr = [...prev];
-        arr.forEach((villain, i) => {
+        arr.forEach((villain) => {
           const birdX = 70;
           const birdRight = birdX + BIRD_SIZE;
           const birdBottom = birdY + BIRD_SIZE;
@@ -681,13 +663,14 @@ export default function GameScreen() {
       activeOpacity={1} 
       onPress={flap}
     >
+      {/* FIX 4: Better background to prevent dark sky issues */}
+      <View style={styles.skyBackground} />
       {renderClouds()}
 
       <View style={styles.topBar}>
         <View style={styles.scoreBox}>
           <Text style={styles.scoreLabel}>Score</Text>
           <Text style={styles.score}>{score}</Text>
-          {/* Display current speed level */}
           <Text style={styles.speedLevel}>
             Speed: {Math.floor((currentGravity / INITIAL_GRAVITY - 1) * 100)}%
           </Text>
@@ -832,7 +815,6 @@ export default function GameScreen() {
   );
 }
 
-// ... (styles remain exactly the same as previous version)
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
@@ -844,6 +826,16 @@ const styles = StyleSheet.create({
   gameContainer: { 
     flex: 1, 
     backgroundColor: '#87CEEB' 
+  },
+  // FIX 4: Added solid sky background
+  skyBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#87CEEB',
+    zIndex: 0
   },
   title: { 
     fontSize: 42, 
